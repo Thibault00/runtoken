@@ -63,11 +63,10 @@ impl Tokenizer {
             }
         }
 
-        // Cache miss: do the work
-        let chunks = self.pattern.split(text);
+        // Cache miss: do the work with inline chunk processing (no intermediate Vec)
         let mut tokens = Vec::new();
         let mut cc = self.chunk_cache.borrow_mut();
-        for chunk in chunks {
+        self.pattern.for_each_chunk(text, |chunk| {
             let chunk_bytes = chunk.as_bytes();
             if let Some(entry) = cc.get(chunk_bytes) {
                 tokens.extend_from_slice(entry);
@@ -76,7 +75,7 @@ impl Tokenizer {
                 cc.put(chunk_bytes.to_vec(), chunk_tokens.clone());
                 tokens.extend(chunk_tokens);
             }
-        }
+        });
 
         // Store in text-level cache
         self.text_cache.borrow_mut().put(text_hash, tokens.clone());
