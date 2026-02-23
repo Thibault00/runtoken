@@ -526,6 +526,7 @@ dependencies = [
  "lru",
  "pyo3",
  "rayon",
+ "regex",
  "rustc-hash",
 ]
 
