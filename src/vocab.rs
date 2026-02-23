@@ -12,6 +12,8 @@ pub struct Vocab {
     pub decoder: Vec<Vec<u8>>,
     /// Total number of tokens
     pub n_vocab: usize,
+    /// Direct lookup for single-byte tokens (avoids HashMap overhead)
+    pub single_byte_ranks: [u32; 256],
 }
 
 impl Vocab {
@@ -49,10 +51,19 @@ impl Vocab {
             decoder[rank as usize] = bytes.clone();
         }
 
+        // Build single-byte rank lookup
+        let mut single_byte_ranks = [u32::MAX; 256];
+        for byte_val in 0u8..=255 {
+            if let Some(&rank) = encoder.get(&vec![byte_val]) {
+                single_byte_ranks[byte_val as usize] = rank;
+            }
+        }
+
         Ok(Vocab {
             encoder,
             decoder,
             n_vocab,
+            single_byte_ranks,
         })
     }
 
@@ -60,6 +71,12 @@ impl Vocab {
     #[inline]
     pub fn rank(&self, bytes: &[u8]) -> Option<u32> {
         self.encoder.get(bytes).copied()
+    }
+
+    /// Fast single-byte rank lookup (no HashMap overhead).
+    #[inline(always)]
+    pub fn rank_single_byte(&self, byte: u8) -> u32 {
+        self.single_byte_ranks[byte as usize]
     }
 }
 
@@ -71,12 +88,24 @@ mod tests {
     fn test_load_cl100k() {
         let path = Path::new("vocab/cl100k_base.tiktoken");
         if !path.exists() {
-            return; // skip if no vocab file
+            return;
         }
         let vocab = Vocab::from_tiktoken_file(path).unwrap();
         assert_eq!(vocab.n_vocab, 100256);
-        // "hello" should be in vocab
         let hello_rank = vocab.rank(b"hello");
         assert!(hello_rank.is_some());
+    }
+
+    #[test]
+    fn test_single_byte_ranks() {
+        let path = Path::new("vocab/cl100k_base.tiktoken");
+        if !path.exists() {
+            return;
+        }
+        let vocab = Vocab::from_tiktoken_file(path).unwrap();
+        // Space should have a valid rank
+        assert_ne!(vocab.rank_single_byte(b' '), u32::MAX);
+        // Should match HashMap lookup
+        assert_eq!(vocab.rank_single_byte(b' '), vocab.rank(b" ").unwrap());
     }
 }
