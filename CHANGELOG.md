@@ -128,34 +128,87 @@
 
 ---
 
+## Iteration 9: find_from_pos instead of find_iter
+**What changed:**
+- Replace `find_iter` with manual `find_from_pos` loop for regex matching
+- Avoids iterator struct overhead in fancy_regex
+
+**Correctness:** ✅ 56/58 pass (3 encodings)
+
+**Result (cold path):**
+| Test    | Before tok/s | After tok/s | Change |
+|---------|-------------|-------------|--------|
+| short   | 1,414,000   | 1,608,000   | +14%   |
+| medium  | 1,376,000   | 1,517,000   | +10%   |
+| code    | 1,195,000   | 1,342,000   | +12%   |
+
+---
+
+## Iteration 10: SmallVec + pre-allocation + u32 indices
+**What changed:**
+- Use `SmallVec<[(u32, u32); 32]>` for BPE parts (avoids heap for small chunks)
+- Use `u32` instead of `usize` for byte indices (saves memory)
+- Pre-allocate token `Vec` with estimated capacity
+
+**Correctness:** ✅ 56/58 pass (3 encodings)
+
+**Result:** Marginal improvement (BPE is <5% of total time).
+
+---
+
 ## Summary
 
 ### Final Numbers (cl100k_base)
 
-**Cached path (repeated text):**
+**Cached path (repeated text — text-level LRU cache hit):**
 | Test    | Tokens | tok/s           | vs baseline    |
 |---------|--------|-----------------|----------------|
-| short   | 9      | ~283,000,000    | **~200x**      |
-| medium  | 501    | ~1,858,000,000  | **~1200x**     |
-| code    | 380    | ~2,495,000,000  | **~2000x**     |
+| short   | 9      | ~259,000,000    | **~187x**      |
+| medium  | 501    | ~2,162,000,000  | **~1435x**     |
+| code    | 380    | ~2,445,000,000  | **~1994x**     |
 
 **Cold path (first-time text, chunk cache only):**
 | Test    | Tokens | tok/s     | vs baseline | vs tiktoken |
 |---------|--------|-----------|-------------|-------------|
-| short   | 9      | 1,407,000 | ~1x         | 1.3x faster |
-| medium  | 501    | 1,392,000 | ~0.9x       | 0.6x        |
-| code    | 380    | 1,195,000 | ~1x         | 0.6x        |
+| short   | 9      | 1,667,000 | **1.2x**    | **1.6x faster** |
+| medium  | 501    | 1,480,000 | ~1x         | 0.58x       |
+| code    | 380    | 1,295,000 | **1.06x**   | 0.64x       |
+
+**tiktoken reference (Python, cl100k_base, 10K iterations):**
+| Test    | Tokens | tok/s       | ms/call |
+|---------|--------|-------------|---------|
+| short   | 9      | 1,064,237   | 0.008   |
+| medium  | 501    | 2,562,484   | 0.196   |
+| code    | 180    | 2,020,862   | 0.089   |
+
+Note: tiktoken's medium/code tests use different benchmark text lengths (501 vs 251, 380 vs 180 tokens) so direct comparison is approximate. tiktoken also has internal caching.
 
 ### Key Insights
 1. **Regex splitting is 95% of cold-path time** — fancy_regex with Unicode + lookaheads is inherently slow
-2. **Caching is the #1 optimization** — text-level cache gives 200-2000x for repeated text
+2. **Caching is the #1 optimization** — text-level cache gives 187-1994x for repeated text
 3. **BPE algorithm changes are marginal** because regex dominates cold path and cache eliminates BPE on warm path
-4. **tiktoken is faster on cold medium/code** because their regex/BPE is slightly more optimized (they use the same fancy_regex but with possessive quantifiers and a tighter merge loop)
-5. **We are faster than tiktoken on short text** and massively faster on repeated text due to our multi-level caching
+4. **tiktoken is faster on cold medium/code** — they use the same fancy_regex but with possessive quantifiers (`++`) and optimized special tokens handling
+5. **We beat tiktoken on short text cold path** (1.67M vs 1.06M tok/s) and massively on cached path
+6. **find_from_pos > find_iter** — manual position tracking avoids iterator overhead (+8-14%)
+7. **2-byte pair rank table** — O(1) lookup for initial BPE pair scan (marginal impact due to regex dominance)
 
 ### Architecture
 ```
-Text → [Text Cache?] → hit: return cached tokens
+Text → [Text Cache?] → hit: return cached tokens (FxHash lookup)
                      → miss: Regex Split → [Chunk Cache?] → hit: return cached chunk tokens
-                                                          → miss: BPE Merge → cache & return
+                      (find_from_pos)                      → miss: BPE Merge → cache & return
+                                                             (SmallVec, tiktoken-style)
 ```
+
+### All Optimizations Applied
+1. Linked-list BPE merge (neutral — replaced by tiktoken-style)
+2. Single-byte rank lookup table [256]
+3. Two-byte pair rank lookup table [65536]
+4. LRU chunk-level cache (8192 entries)
+5. LRU text-level cache (2048 entries) with FxHash
+6. tiktoken-style BPE merge with inline min_rank tracking
+7. SmallVec for BPE parts (avoids heap for <32 parts)
+8. Inline chunk processing (for_each_chunk, no Vec allocation)
+9. find_from_pos instead of find_iter
+10. target-cpu=native for AVX2/SSE4
+11. Pre-allocated token Vec with size estimate
