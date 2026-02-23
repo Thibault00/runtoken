@@ -1,7 +1,7 @@
 use crate::vocab::Vocab;
+use smallvec::SmallVec;
 
 /// Core BPE merge algorithm — tiktoken-style implementation.
-/// Uses two paths: fast path for small pieces (<100 bytes), heap-based for large.
 pub fn bpe_encode_chunk(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
     let len = piece.len();
     if len == 0 {
@@ -15,19 +15,17 @@ pub fn bpe_encode_chunk(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
         return vec![rank];
     }
 
-    bpe_merge_small(piece, vocab)
+    bpe_merge(piece, vocab)
 }
 
-/// Fast BPE merge for small pieces (most regex chunks are <50 bytes).
-/// Tracks min_rank inline to avoid full rescan each iteration.
-/// Based on tiktoken's _byte_pair_merge approach.
-fn bpe_merge_small(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
+/// BPE merge using SmallVec to avoid heap allocation for small pieces.
+/// Most regex chunks are <30 bytes, so 32 elements fits on the stack.
+fn bpe_merge(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
     let n = piece.len();
     
     // parts[i] = (byte_start_index, rank_of_merge_at_this_position)
-    // The rank stored is for merging parts[i] with parts[i+1].
-    // We add two sentinel entries at the end.
-    let mut parts: Vec<(usize, u32)> = Vec::with_capacity(n + 1);
+    // SmallVec avoids heap for pieces up to ~30 bytes (common case)
+    let mut parts: SmallVec<[(u32, u32); 32]> = SmallVec::with_capacity(n + 1);
     
     let mut min_rank: u32 = u32::MAX;
     let mut min_idx: usize = usize::MAX;
@@ -38,16 +36,14 @@ fn bpe_merge_small(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
             min_rank = rank;
             min_idx = i;
         }
-        parts.push((i, rank));
+        parts.push((i as u32, rank));
     }
-    parts.push((n - 1, u32::MAX)); // last byte
-    parts.push((n, u32::MAX));     // sentinel
+    parts.push(((n - 1) as u32, u32::MAX)); // last byte
+    parts.push((n as u32, u32::MAX));        // sentinel
     
-    // Inline rank getter: computes the rank of merging parts[i] with parts[i+1] 
-    // AFTER parts[i+1] will be removed (so we look at parts[i+2] which becomes parts[i+1])
-    let get_rank = |parts: &Vec<(usize, u32)>, i: usize| -> u32 {
+    let get_rank = |parts: &SmallVec<[(u32, u32); 32]>, i: usize| -> u32 {
         if i + 3 < parts.len() {
-            vocab.rank(&piece[parts[i].0..parts[i + 3].0]).unwrap_or(u32::MAX)
+            vocab.rank(&piece[parts[i].0 as usize..parts[i + 3].0 as usize]).unwrap_or(u32::MAX)
         } else {
             u32::MAX
         }
@@ -56,7 +52,6 @@ fn bpe_merge_small(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
     while min_rank != u32::MAX {
         let i = min_idx;
         
-        // Update ranks for affected positions before removal
         if i > 0 {
             parts[i - 1].1 = get_rank(&parts, i - 1);
         }
@@ -78,7 +73,7 @@ fn bpe_merge_small(piece: &[u8], vocab: &Vocab) -> Vec<u32> {
     parts
         .windows(2)
         .map(|w| {
-            vocab.rank(&piece[w[0].0..w[1].0]).unwrap_or(0)
+            vocab.rank(&piece[w[0].0 as usize..w[1].0 as usize]).unwrap_or(0)
         })
         .collect()
 }
@@ -96,13 +91,12 @@ pub fn bpe_count_chunk(piece: &[u8], vocab: &Vocab) -> usize {
         return 1;
     }
     
-    // Use the same merge but just count the result
-    bpe_count_small(piece, vocab)
+    bpe_count_merge(piece, vocab)
 }
 
-fn bpe_count_small(piece: &[u8], vocab: &Vocab) -> usize {
+fn bpe_count_merge(piece: &[u8], vocab: &Vocab) -> usize {
     let n = piece.len();
-    let mut parts: Vec<(usize, u32)> = Vec::with_capacity(n + 1);
+    let mut parts: SmallVec<[(u32, u32); 32]> = SmallVec::with_capacity(n + 1);
     
     let mut min_rank: u32 = u32::MAX;
     let mut min_idx: usize = usize::MAX;
@@ -113,14 +107,14 @@ fn bpe_count_small(piece: &[u8], vocab: &Vocab) -> usize {
             min_rank = rank;
             min_idx = i;
         }
-        parts.push((i, rank));
+        parts.push((i as u32, rank));
     }
-    parts.push((n - 1, u32::MAX));
-    parts.push((n, u32::MAX));
+    parts.push(((n - 1) as u32, u32::MAX));
+    parts.push((n as u32, u32::MAX));
     
-    let get_rank = |parts: &Vec<(usize, u32)>, i: usize| -> u32 {
+    let get_rank = |parts: &SmallVec<[(u32, u32); 32]>, i: usize| -> u32 {
         if i + 3 < parts.len() {
-            vocab.rank(&piece[parts[i].0..parts[i + 3].0]).unwrap_or(u32::MAX)
+            vocab.rank(&piece[parts[i].0 as usize..parts[i + 3].0 as usize]).unwrap_or(u32::MAX)
         } else {
             u32::MAX
         }
@@ -144,7 +138,7 @@ fn bpe_count_small(piece: &[u8], vocab: &Vocab) -> usize {
         }
     }
     
-    parts.len() - 1 // -1 for the sentinel
+    parts.len() - 1
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@ lru = "0.12"
 rayon = "1.10"
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 regex = "1.12.3"
+smallvec = "1.15.1"
 
 [features]
 default = []

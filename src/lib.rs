@@ -88,7 +88,8 @@ impl Tokenizer {
     /// Inner encode: regex split + chunk-cached BPE
     #[inline]
     fn encode_inner(&self, text: &str) -> Vec<u32> {
-        let mut tokens = Vec::new();
+        // Pre-allocate: rough estimate of ~1 token per 4 bytes
+        let mut tokens = Vec::with_capacity(text.len() / 3 + 1);
         let mut cc = self.chunk_cache.borrow_mut();
         self.pattern.for_each_chunk(text, |chunk| {
             let chunk_bytes = chunk.as_bytes();
