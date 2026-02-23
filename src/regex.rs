@@ -1,13 +1,14 @@
-use fancy_regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
 /// Pre-compiled regex patterns for different encodings.
+/// fancy_regex handles lookaheads required by BPE patterns.
 pub struct SplitPattern {
-    regex: Regex,
+    regex: FancyRegex,
 }
 
 impl SplitPattern {
     pub fn new(pattern: &str) -> Result<Self, fancy_regex::Error> {
-        let regex = Regex::new(pattern)?;
+        let regex = FancyRegex::new(pattern)?;
         Ok(SplitPattern { regex })
     }
 
@@ -15,17 +16,11 @@ impl SplitPattern {
     #[inline]
     pub fn split<'a>(&self, text: &'a str) -> Vec<&'a str> {
         let mut result = Vec::new();
-        for mat in self.regex.find_iter(text) {
-            match mat {
-                Ok(m) => result.push(&text[m.start()..m.end()]),
-                Err(_) => break,
-            }
-        }
+        self.for_each_chunk(text, |chunk| result.push(chunk));
         result
     }
 
     /// Process chunks inline without collecting into Vec.
-    /// Calls the callback for each regex match.
     #[inline]
     pub fn for_each_chunk<'a, F>(&self, text: &'a str, mut f: F)
     where

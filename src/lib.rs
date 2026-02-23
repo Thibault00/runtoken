@@ -16,6 +16,12 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+/// Text cache entry: stores both tokens and count
+#[derive(Clone)]
+struct TextCacheEntry {
+    tokens: Vec<u32>,
+}
+
 /// A complete tokenizer for a specific encoding with multi-level caching.
 pub struct Tokenizer {
     pub vocab: Vocab,
@@ -24,7 +30,7 @@ pub struct Tokenizer {
     /// Level 1: chunk-level cache (chunk bytes → encoded tokens)
     chunk_cache: RefCell<LruCache<Vec<u8>, Vec<u32>>>,
     /// Level 2: full-text cache (text hash → encoded tokens)
-    text_cache: RefCell<LruCache<u64, Vec<u32>>>,
+    text_cache: RefCell<LruCache<u64, TextCacheEntry>>,
 }
 
 /// Fast hash of a string using FxHash
@@ -51,7 +57,7 @@ impl Tokenizer {
             pattern,
             encoding_name: encoding_name.to_string(),
             chunk_cache: RefCell::new(LruCache::new(NonZeroUsize::new(8192).unwrap())),
-            text_cache: RefCell::new(LruCache::new(NonZeroUsize::new(1024).unwrap())),
+            text_cache: RefCell::new(LruCache::new(NonZeroUsize::new(2048).unwrap())),
         })
     }
 
@@ -62,32 +68,26 @@ impl Tokenizer {
         {
             let mut tc = self.text_cache.borrow_mut();
             if let Some(cached) = tc.get(&text_hash) {
-                return cached.clone();
+                return cached.tokens.clone();
             }
         }
 
-        // Cache miss: do the work with inline chunk processing (no intermediate Vec)
-        let mut tokens = Vec::new();
-        let mut cc = self.chunk_cache.borrow_mut();
-        self.pattern.for_each_chunk(text, |chunk| {
-            let chunk_bytes = chunk.as_bytes();
-            if let Some(entry) = cc.get(chunk_bytes) {
-                tokens.extend_from_slice(entry);
-            } else {
-                let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
-                cc.put(chunk_bytes.to_vec(), chunk_tokens.clone());
-                tokens.extend(chunk_tokens);
-            }
-        });
+        // Cache miss: do the work with inline chunk processing
+        let tokens = self.encode_inner(text);
 
         // Store in text-level cache
-        self.text_cache.borrow_mut().put(text_hash, tokens.clone());
+        self.text_cache.borrow_mut().put(text_hash, TextCacheEntry { tokens: tokens.clone() });
         tokens
     }
 
     /// Encode without text-level cache (for benchmarking cold path).
-    /// Still uses chunk-level cache.
     pub fn encode_no_text_cache(&self, text: &str) -> Vec<u32> {
+        self.encode_inner(text)
+    }
+
+    /// Inner encode: regex split + chunk-cached BPE
+    #[inline]
+    fn encode_inner(&self, text: &str) -> Vec<u32> {
         let mut tokens = Vec::new();
         let mut cc = self.chunk_cache.borrow_mut();
         self.pattern.for_each_chunk(text, |chunk| {
@@ -103,11 +103,22 @@ impl Tokenizer {
         tokens
     }
 
-    /// Count tokens (with caching).
+    /// Count tokens (with caching — returns cached len without cloning Vec).
     pub fn count(&self, text: &str) -> usize {
-        // Use encode which is cached — the allocation overhead is minimal
-        // compared to regex splitting
-        self.encode(text).len()
+        // Check text-level cache for count without cloning
+        let text_hash = fx_hash_str(text);
+        {
+            let mut tc = self.text_cache.borrow_mut();
+            if let Some(cached) = tc.get(&text_hash) {
+                return cached.tokens.len();
+            }
+        }
+
+        // Cache miss: encode and cache
+        let tokens = self.encode_inner(text);
+        let count = tokens.len();
+        self.text_cache.borrow_mut().put(text_hash, TextCacheEntry { tokens });
+        count
     }
 
     /// Decode token IDs back to text.
