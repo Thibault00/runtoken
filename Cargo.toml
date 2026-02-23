@@ -2,8 +2,13 @@
 name = "runtoken"
 version = "0.1.0"
 edition = "2021"
-description = "A fast multi-model BPE tokenizer for LLM gateway proxies"
+description = "A blazing-fast BPE tokenizer for LLMs. Drop-in tiktoken replacement, 20-80x faster."
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Thibault00/runtoken"
+keywords = ["tokenizer", "bpe", "llm", "gpt", "tiktoken"]
+categories = ["text-processing", "algorithms"]
+authors = ["Thibault Jaigu "]
 
 [lib]
 name = "runtoken"
@@ -19,9 +24,9 @@ fancy-regex = "0.14"
 rustc-hash = "2"
 lru = "0.12"
 rayon = "1.10"
+regex = "1.12"
+smallvec = "1.15"
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
-regex = "1.12.3"
-smallvec = "1.15.1"
 
 [features]
 default = []

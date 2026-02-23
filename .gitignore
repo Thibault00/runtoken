@@ -1,4 +1,11 @@
 /target
+/test_data
+/.venv
 *.swp
 *.swo
+*.pyc
+__pycache__/
 .DS_Store
+*.egg-info/
+dist/
+*.whl
