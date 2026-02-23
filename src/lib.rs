@@ -2,17 +2,28 @@ pub mod bpe;
 pub mod regex;
 pub mod vocab;
 
-use bpe::{bpe_count_chunk, bpe_encode_chunk};
+use bpe::bpe_encode_chunk;
 use regex::{pattern_for_encoding, SplitPattern};
 use vocab::Vocab;
 
+use lru::LruCache;
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
-/// A complete tokenizer for a specific encoding.
+/// Cache entry: stores both the token IDs and the count
+#[derive(Clone)]
+struct CacheEntry {
+    tokens: Vec<u32>,
+}
+
+/// A complete tokenizer for a specific encoding with chunk-level caching.
 pub struct Tokenizer {
     pub vocab: Vocab,
     pub pattern: SplitPattern,
     pub encoding_name: String,
+    /// LRU cache: chunk bytes → encoded tokens
+    cache: RefCell<LruCache<Vec<u8>, CacheEntry>>,
 }
 
 impl Tokenizer {
@@ -31,6 +42,7 @@ impl Tokenizer {
             vocab,
             pattern,
             encoding_name: encoding_name.to_string(),
+            cache: RefCell::new(LruCache::new(NonZeroUsize::new(8192).unwrap())),
         })
     }
 
@@ -38,9 +50,16 @@ impl Tokenizer {
     pub fn encode(&self, text: &str) -> Vec<u32> {
         let chunks = self.pattern.split(text);
         let mut tokens = Vec::new();
+        let mut cache = self.cache.borrow_mut();
         for chunk in chunks {
-            let chunk_tokens = bpe_encode_chunk(chunk.as_bytes(), &self.vocab);
-            tokens.extend(chunk_tokens);
+            let chunk_bytes = chunk.as_bytes();
+            if let Some(entry) = cache.get(chunk_bytes) {
+                tokens.extend_from_slice(&entry.tokens);
+            } else {
+                let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
+                cache.put(chunk_bytes.to_vec(), CacheEntry { tokens: chunk_tokens.clone() });
+                tokens.extend(chunk_tokens);
+            }
         }
         tokens
     }
@@ -49,8 +68,17 @@ impl Tokenizer {
     pub fn count(&self, text: &str) -> usize {
         let chunks = self.pattern.split(text);
         let mut count = 0;
+        let mut cache = self.cache.borrow_mut();
         for chunk in chunks {
-            count += bpe_count_chunk(chunk.as_bytes(), &self.vocab);
+            let chunk_bytes = chunk.as_bytes();
+            if let Some(entry) = cache.get(chunk_bytes) {
+                count += entry.tokens.len();
+            } else {
+                let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
+                let len = chunk_tokens.len();
+                cache.put(chunk_bytes.to_vec(), CacheEntry { tokens: chunk_tokens });
+                count += len;
+            }
         }
         count
     }

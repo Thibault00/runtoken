@@ -82,15 +82,25 @@ fn run_benchmark(encoding: &str) {
         let count_elapsed = start.elapsed();
         let count_tps = (total_count as f64) / count_elapsed.as_secs_f64();
 
+        // Benchmark regex only
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let chunks = tokenizer.pattern.split(text);
+            std::hint::black_box(chunks);
+        }
+        let regex_elapsed = start.elapsed();
+
         let tokens_per_call = total_tokens / iterations;
         println!(
-            "{:>8}: {:>4} tokens | encode: {:>10.0} tok/s ({:.2}ms/call) | count: {:>10.0} tok/s ({:.2}ms/call)",
+            "{:>8}: {:>4} tokens | encode: {:>10.0} tok/s ({:.3}ms) | count: {:>10.0} tok/s ({:.3}ms) | regex: {:.3}ms ({:.0}%)",
             label,
             tokens_per_call,
             encode_tps,
-            encode_elapsed.as_millis() as f64 / iterations as f64,
+            encode_elapsed.as_secs_f64() * 1000.0 / iterations as f64,
             count_tps,
-            count_elapsed.as_millis() as f64 / iterations as f64,
+            count_elapsed.as_secs_f64() * 1000.0 / iterations as f64,
+            regex_elapsed.as_secs_f64() * 1000.0 / iterations as f64,
+            regex_elapsed.as_secs_f64() / encode_elapsed.as_secs_f64() * 100.0,
         );
     }
 }
