@@ -82,6 +82,24 @@ impl Tokenizer {
         tokens
     }
 
+    /// Encode without text-level cache (for benchmarking cold path).
+    /// Still uses chunk-level cache.
+    pub fn encode_no_text_cache(&self, text: &str) -> Vec<u32> {
+        let mut tokens = Vec::new();
+        let mut cc = self.chunk_cache.borrow_mut();
+        self.pattern.for_each_chunk(text, |chunk| {
+            let chunk_bytes = chunk.as_bytes();
+            if let Some(entry) = cc.get(chunk_bytes) {
+                tokens.extend_from_slice(entry);
+            } else {
+                let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
+                cc.put(chunk_bytes.to_vec(), chunk_tokens.clone());
+                tokens.extend(chunk_tokens);
+            }
+        });
+        tokens
+    }
+
     /// Count tokens (with caching).
     pub fn count(&self, text: &str) -> usize {
         // Use encode which is cached — the allocation overhead is minimal

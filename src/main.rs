@@ -96,33 +96,31 @@ fn run_benchmark(encoding: &str) {
     }
 
     println!();
-    println!("--- Cold (fresh tokenizer, no cache, measures regex + BPE) ---");
+    println!("--- Cold (chunk-cache only, no text cache, measures regex + cached BPE) ---");
     {
         for (label, text) in &test_cases {
             let text = text.as_ref();
+            // Use encode_uncached to bypass text-level cache
+            let tokenizer = Tokenizer::new(encoding).expect("Failed to load tokenizer");
+            // Warmup
+            for _ in 0..100 {
+                let _ = tokenizer.encode_no_text_cache(text);
+            }
+            
             let iterations = 10000;
             let start = Instant::now();
             let mut total_tokens = 0;
             for _ in 0..iterations {
-                // Fresh tokenizer each time = no cache
-                let t = Tokenizer::new(encoding).expect("Failed to load tokenizer");
-                total_tokens += t.encode(text).len();
+                total_tokens += tokenizer.encode_no_text_cache(text).len();
             }
             let elapsed = start.elapsed();
-            // Subtract tokenizer creation overhead
-            let start2 = Instant::now();
-            for _ in 0..iterations {
-                let _t = Tokenizer::new(encoding).expect("Failed to load tokenizer");
-            }
-            let create_elapsed = start2.elapsed();
-            let encode_only = elapsed.saturating_sub(create_elapsed);
-            let tps = (total_tokens as f64) / encode_only.as_secs_f64();
+            let tps = (total_tokens as f64) / elapsed.as_secs_f64();
             let tokens_per_call = total_tokens / iterations;
 
             println!(
                 "{:>8}: {:>4} tokens | {:>12.0} tok/s | {:.3}ms/call",
                 label, tokens_per_call, tps,
-                encode_only.as_secs_f64() * 1000.0 / iterations as f64,
+                elapsed.as_secs_f64() * 1000.0 / iterations as f64,
             );
         }
     }
