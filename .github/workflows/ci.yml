@@ -16,23 +16,14 @@ jobs:
         run: cargo test --all
       - name: Build release
         run: cargo build --release
-
-  build-wheels:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install maturin
-        run: pip install maturin
-      - name: Build wheel
-        run: maturin build --release --strip
-      - uses: actions/upload-artifact@v4
+          python-version: '3.12'
+      - name: Build Python wheel
+        uses: PyO3/maturin-action@v1
         with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: target/wheels/*.whl
+          args: --release --strip --out dist --find-interpreter
+      - name: Install and smoke test
+        run: |
+          pip install dist/*.whl
+          python -c "import runtoken; enc = runtoken.get_encoding('cl100k_base'); assert enc.encode('Hello') == [9906]; print('OK')"
