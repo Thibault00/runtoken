@@ -14,6 +14,9 @@ pub struct Vocab {
     pub n_vocab: usize,
     /// Direct lookup for single-byte tokens (avoids HashMap overhead)
     pub single_byte_ranks: [u32; 256],
+    /// Direct lookup for two-byte pairs: [byte0 * 256 + byte1] -> rank
+    /// Avoids HashMap overhead for the most common BPE lookup
+    pub two_byte_ranks: Vec<u32>,
 }
 
 impl Vocab {
@@ -59,24 +62,52 @@ impl Vocab {
             }
         }
 
+        // Build two-byte pair lookup (65536 entries)
+        let mut two_byte_ranks = vec![u32::MAX; 65536];
+        for (bytes, &rank) in &encoder {
+            if bytes.len() == 2 {
+                let idx = (bytes[0] as usize) * 256 + bytes[1] as usize;
+                two_byte_ranks[idx] = rank;
+            }
+        }
+
         Ok(Vocab {
             encoder,
             decoder,
             n_vocab,
             single_byte_ranks,
+            two_byte_ranks,
         })
     }
 
     /// Look up the rank of a byte sequence. Returns None if not in vocab.
-    #[inline]
+    /// Optimized: uses direct lookup for 1 and 2-byte sequences.
+    #[inline(always)]
     pub fn rank(&self, bytes: &[u8]) -> Option<u32> {
-        self.encoder.get(bytes).copied()
+        match bytes.len() {
+            1 => {
+                let r = self.single_byte_ranks[bytes[0] as usize];
+                if r != u32::MAX { Some(r) } else { None }
+            }
+            2 => {
+                let idx = (bytes[0] as usize) * 256 + bytes[1] as usize;
+                let r = self.two_byte_ranks[idx];
+                if r != u32::MAX { Some(r) } else { None }
+            }
+            _ => self.encoder.get(bytes).copied(),
+        }
     }
 
     /// Fast single-byte rank lookup (no HashMap overhead).
     #[inline(always)]
     pub fn rank_single_byte(&self, byte: u8) -> u32 {
         self.single_byte_ranks[byte as usize]
+    }
+
+    /// Fast two-byte rank lookup. Returns u32::MAX if not in vocab.
+    #[inline(always)]
+    pub fn rank_two_bytes(&self, b0: u8, b1: u8) -> u32 {
+        self.two_byte_ranks[(b0 as usize) * 256 + b1 as usize]
     }
 }
 

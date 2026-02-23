@@ -1,13 +1,13 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
-use crate::Tokenizer;
+use crate::{Tokenizer, TokenizerRegistry};
 use std::path::Path;
+use std::sync::Mutex;
 
-/// Python wrapper around the Rust Tokenizer.
-/// Vocab files are bundled — just pass the encoding name.
+/// Thread-safe wrapper around the Rust Tokenizer for Python.
 #[pyclass]
 struct PyTokenizer {
-    inner: Tokenizer,
+    inner: Mutex<Tokenizer>,
 }
 
 #[pymethods]
@@ -26,39 +26,44 @@ impl PyTokenizer {
             Tokenizer::new(encoding_name)
         };
         inner
-            .map(|t| PyTokenizer { inner: t })
+            .map(|t| PyTokenizer { inner: Mutex::new(t) })
             .map_err(|e| PyValueError::new_err(format!("Failed to load tokenizer: {}", e)))
     }
 
     /// Encode text to a list of token IDs.
-    fn encode(&self, text: &str) -> Vec<u32> {
-        self.inner.encode(text)
+    fn encode(&self, text: &str) -> PyResult<Vec<u32>> {
+        let tok = self.inner.lock().map_err(|e| PyValueError::new_err(format!("Lock error: {}", e)))?;
+        Ok(tok.encode(text))
     }
 
-    /// Count tokens in text (same result as len(encode(text)) but may be faster).
-    fn count(&self, text: &str) -> usize {
-        self.inner.count(text)
+    /// Count tokens in text.
+    fn count(&self, text: &str) -> PyResult<usize> {
+        let tok = self.inner.lock().map_err(|e| PyValueError::new_err(format!("Lock error: {}", e)))?;
+        Ok(tok.count(text))
     }
 
     /// Decode token IDs back to text.
-    fn decode(&self, tokens: Vec<u32>) -> String {
-        self.inner.decode(&tokens)
+    fn decode(&self, tokens: Vec<u32>) -> PyResult<String> {
+        let tok = self.inner.lock().map_err(|e| PyValueError::new_err(format!("Lock error: {}", e)))?;
+        Ok(tok.decode(&tokens))
     }
 
     /// Get the encoding name.
     #[getter]
-    fn encoding_name(&self) -> &str {
-        &self.inner.encoding_name
+    fn encoding_name(&self) -> PyResult<String> {
+        let tok = self.inner.lock().map_err(|e| PyValueError::new_err(format!("Lock error: {}", e)))?;
+        Ok(tok.encoding_name.clone())
     }
 
     /// Get vocab size.
     #[getter]
-    fn vocab_size(&self) -> usize {
-        self.inner.vocab.encoder.len()
+    fn vocab_size(&self) -> PyResult<usize> {
+        let tok = self.inner.lock().map_err(|e| PyValueError::new_err(format!("Lock error: {}", e)))?;
+        Ok(tok.vocab.encoder.len())
     }
 }
 
-/// Get a tokenizer for an encoding name (convenience function).
+/// Get a tokenizer for an encoding name.
 ///
 /// >>> import runtoken
 /// >>> enc = runtoken.get_encoding("cl100k_base")
@@ -77,7 +82,7 @@ fn get_encoding(encoding_name: &str) -> PyResult<PyTokenizer> {
 /// 4
 #[pyfunction]
 fn encoding_for_model(model: &str) -> PyResult<PyTokenizer> {
-    let enc_name = crate::TokenizerRegistry::encoding_for_model(model);
+    let enc_name = TokenizerRegistry::encoding_for_model(model);
     PyTokenizer::new(enc_name, None)
 }
 
@@ -89,7 +94,7 @@ fn encoding_for_model(model: &str) -> PyResult<PyTokenizer> {
 #[pyfunction]
 #[pyo3(signature = (text, model="gpt-4o", encoding=None))]
 fn count(text: &str, model: &str, encoding: Option<&str>) -> PyResult<usize> {
-    let enc_name = encoding.unwrap_or_else(|| crate::TokenizerRegistry::encoding_for_model(model));
+    let enc_name = encoding.unwrap_or_else(|| TokenizerRegistry::encoding_for_model(model));
     let tok = Tokenizer::new(enc_name)
         .map_err(|e| PyValueError::new_err(format!("Failed to load tokenizer: {}", e)))?;
     Ok(tok.count(text))
