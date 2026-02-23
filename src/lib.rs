@@ -2,6 +2,9 @@ pub mod bpe;
 pub mod regex;
 pub mod vocab;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 use bpe::bpe_encode_chunk;
 use regex::{pattern_for_encoding, SplitPattern};
 use vocab::Vocab;

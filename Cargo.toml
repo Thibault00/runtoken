@@ -33,7 +33,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 opt-level = 3
 lto = true
 codegen-units = 1
-# target-cpu = "native"  # set via RUSTFLAGS instead
 
 [[bench]]
 name = "benchmark"
