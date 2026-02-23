@@ -1,7 +1,7 @@
 use fancy_regex::Regex as FancyRegex;
 
 /// Pre-compiled regex patterns for different encodings.
-/// fancy_regex handles lookaheads required by BPE patterns.
+/// Uses fancy_regex for patterns with lookaheads (\s+(?!\S)).
 pub struct SplitPattern {
     regex: FancyRegex,
 }
@@ -21,15 +21,22 @@ impl SplitPattern {
     }
 
     /// Process chunks inline without collecting into Vec.
+    /// This is the hot path — called for every encode.
     #[inline]
     pub fn for_each_chunk<'a, F>(&self, text: &'a str, mut f: F)
     where
         F: FnMut(&'a str),
     {
-        for mat in self.regex.find_iter(text) {
-            match mat {
-                Ok(m) => f(&text[m.start()..m.end()]),
-                Err(_) => break,
+        // Use find_from_pos for manual iteration
+        let mut pos = 0;
+        let text_len = text.len();
+        while pos < text_len {
+            match self.regex.find_from_pos(text, pos) {
+                Ok(Some(m)) => {
+                    f(&text[m.start()..m.end()]);
+                    pos = m.end();
+                }
+                _ => break,
             }
         }
     }
@@ -90,5 +97,16 @@ mod tests {
         pat.for_each_chunk("Hello, world!", |chunk| chunks.push(chunk));
         let reconstructed: String = chunks.join("");
         assert_eq!(reconstructed, "Hello, world!");
+    }
+
+    #[test]
+    fn test_whitespace_splits() {
+        // Verify whitespace splitting with lookahead
+        let pat = SplitPattern::cl100k_base();
+        let chunks = pat.split("hello   world");
+        let reconstructed: String = chunks.join("");
+        assert_eq!(reconstructed, "hello   world");
+        // The chunks should be: "hello", "  ", " world"
+        assert_eq!(chunks.len(), 3);
     }
 }
