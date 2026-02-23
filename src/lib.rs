@@ -43,9 +43,33 @@ fn fx_hash_str(s: &str) -> u64 {
 
 impl Tokenizer {
     /// Create a tokenizer from an encoding name (cl100k_base, o200k_base, p50k_base).
+    /// First tries embedded vocab data, then falls back to file on disk.
     pub fn new(encoding_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        // Try embedded vocab data first (for pip-installed package)
+        if let Some(data) = Self::embedded_vocab(encoding_name) {
+            let vocab = Vocab::from_tiktoken_str(data)?;
+            let pattern = pattern_for_encoding(encoding_name);
+            return Ok(Tokenizer {
+                vocab,
+                pattern,
+                encoding_name: encoding_name.to_string(),
+                chunk_cache: RefCell::new(LruCache::new(NonZeroUsize::new(8192).unwrap())),
+                text_cache: RefCell::new(LruCache::new(NonZeroUsize::new(2048).unwrap())),
+            });
+        }
+        // Fall back to file on disk
         let vocab_path = format!("vocab/{}.tiktoken", encoding_name);
         Self::from_file(encoding_name, Path::new(&vocab_path))
+    }
+
+    /// Return embedded vocab data for known encodings.
+    fn embedded_vocab(encoding_name: &str) -> Option<&'static str> {
+        match encoding_name {
+            "cl100k_base" => Some(include_str!("../vocab/cl100k_base.tiktoken")),
+            "o200k_base" => Some(include_str!("../vocab/o200k_base.tiktoken")),
+            "p50k_base" => Some(include_str!("../vocab/p50k_base.tiktoken")),
+            _ => None,
+        }
     }
 
     /// Create a tokenizer from an encoding name and a specific vocab file path.

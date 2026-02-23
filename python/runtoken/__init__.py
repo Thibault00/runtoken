@@ -21,4 +21,4 @@ from runtoken._runtoken import (
 )
 
 __all__ = ["Tokenizer", "get_encoding", "encoding_for_model", "count"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
