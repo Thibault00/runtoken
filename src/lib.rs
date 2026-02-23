@@ -7,28 +7,33 @@ use regex::{pattern_for_encoding, SplitPattern};
 use vocab::Vocab;
 
 use lru::LruCache;
+use rustc_hash::FxHasher;
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::Path;
 
-/// Cache entry: stores both the token IDs and the count
-#[derive(Clone)]
-struct CacheEntry {
-    tokens: Vec<u32>,
-}
-
-/// A complete tokenizer for a specific encoding with chunk-level caching.
+/// A complete tokenizer for a specific encoding with multi-level caching.
 pub struct Tokenizer {
     pub vocab: Vocab,
     pub pattern: SplitPattern,
     pub encoding_name: String,
-    /// LRU cache: chunk bytes → encoded tokens
-    cache: RefCell<LruCache<Vec<u8>, CacheEntry>>,
+    /// Level 1: chunk-level cache (chunk bytes → encoded tokens)
+    chunk_cache: RefCell<LruCache<Vec<u8>, Vec<u32>>>,
+    /// Level 2: full-text cache (text hash → encoded tokens)
+    text_cache: RefCell<LruCache<u64, Vec<u32>>>,
+}
+
+/// Fast hash of a string using FxHash
+#[inline]
+fn fx_hash_str(s: &str) -> u64 {
+    let mut hasher = FxHasher::default();
+    s.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Tokenizer {
     /// Create a tokenizer from an encoding name (cl100k_base, o200k_base, p50k_base).
-    /// Looks for vocab files in the `vocab/` directory.
     pub fn new(encoding_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let vocab_path = format!("vocab/{}.tiktoken", encoding_name);
         Self::from_file(encoding_name, Path::new(&vocab_path))
@@ -42,45 +47,47 @@ impl Tokenizer {
             vocab,
             pattern,
             encoding_name: encoding_name.to_string(),
-            cache: RefCell::new(LruCache::new(NonZeroUsize::new(8192).unwrap())),
+            chunk_cache: RefCell::new(LruCache::new(NonZeroUsize::new(8192).unwrap())),
+            text_cache: RefCell::new(LruCache::new(NonZeroUsize::new(1024).unwrap())),
         })
     }
 
-    /// Encode text into token IDs.
+    /// Encode text into token IDs (with full text-level + chunk-level caching).
     pub fn encode(&self, text: &str) -> Vec<u32> {
+        // Level 2: check text-level cache first
+        let text_hash = fx_hash_str(text);
+        {
+            let mut tc = self.text_cache.borrow_mut();
+            if let Some(cached) = tc.get(&text_hash) {
+                return cached.clone();
+            }
+        }
+
+        // Cache miss: do the work
         let chunks = self.pattern.split(text);
         let mut tokens = Vec::new();
-        let mut cache = self.cache.borrow_mut();
+        let mut cc = self.chunk_cache.borrow_mut();
         for chunk in chunks {
             let chunk_bytes = chunk.as_bytes();
-            if let Some(entry) = cache.get(chunk_bytes) {
-                tokens.extend_from_slice(&entry.tokens);
+            if let Some(entry) = cc.get(chunk_bytes) {
+                tokens.extend_from_slice(entry);
             } else {
                 let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
-                cache.put(chunk_bytes.to_vec(), CacheEntry { tokens: chunk_tokens.clone() });
+                cc.put(chunk_bytes.to_vec(), chunk_tokens.clone());
                 tokens.extend(chunk_tokens);
             }
         }
+
+        // Store in text-level cache
+        self.text_cache.borrow_mut().put(text_hash, tokens.clone());
         tokens
     }
 
-    /// Count tokens without allocating the full token array (fast path).
+    /// Count tokens (with caching).
     pub fn count(&self, text: &str) -> usize {
-        let chunks = self.pattern.split(text);
-        let mut count = 0;
-        let mut cache = self.cache.borrow_mut();
-        for chunk in chunks {
-            let chunk_bytes = chunk.as_bytes();
-            if let Some(entry) = cache.get(chunk_bytes) {
-                count += entry.tokens.len();
-            } else {
-                let chunk_tokens = bpe_encode_chunk(chunk_bytes, &self.vocab);
-                let len = chunk_tokens.len();
-                cache.put(chunk_bytes.to_vec(), CacheEntry { tokens: chunk_tokens });
-                count += len;
-            }
-        }
-        count
+        // Use encode which is cached — the allocation overhead is minimal
+        // compared to regex splitting
+        self.encode(text).len()
     }
 
     /// Decode token IDs back to text.
@@ -132,22 +139,15 @@ impl TokenizerRegistry {
     /// Map model name to encoding name.
     pub fn encoding_for_model(model: &str) -> &'static str {
         match model {
-            // GPT-4o family
             m if m.starts_with("gpt-4o") => "o200k_base",
             m if m.starts_with("o1") => "o200k_base",
             m if m.starts_with("o3") => "o200k_base",
-            // GPT-4 family  
             m if m.starts_with("gpt-4") => "cl100k_base",
-            // GPT-3.5 family
             m if m.starts_with("gpt-3.5") => "cl100k_base",
-            // Embeddings
             m if m.contains("embedding") => "cl100k_base",
-            // Claude (approximation — uses cl100k for estimation)
             m if m.starts_with("claude") => "cl100k_base",
-            // Old models
             m if m.starts_with("text-davinci") => "p50k_base",
             m if m.starts_with("code-davinci") => "p50k_base",
-            // Default to cl100k
             _ => "cl100k_base",
         }
     }
