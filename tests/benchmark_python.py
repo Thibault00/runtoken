@@ -57,7 +57,7 @@ for enc_name in encodings:
         rt_tpc, rt_tps, rt_ms = benchmark("runtoken", rt_enc.encode, text)
         
         speedup = rt_tps / tk_tps if tk_tps > 0 else 0
-        winner = "🦀" if speedup > 1 else "🐍"
+        winner = "⚡" if speedup > 1 else "⏱"
         
         print(f"  {label:<25s} | {int(tk_tpc):>6d} | {tk_tps:>11,.0f}/s | {rt_tps:>11,.0f}/s | {speedup:>5.2f}x {winner}")
     
@@ -74,7 +74,7 @@ for enc_name in encodings:
         rt_tpc, rt_tps, rt_ms = benchmark("runtoken", lambda t: rt_enc.count(t), text, iterations=10000)
         
         speedup = rt_tps / tk_tps if tk_tps > 0 else 0
-        winner = "🦀" if speedup > 1 else "🐍"
+        winner = "⚡" if speedup > 1 else "⏱"
         
         print(f"  {label:<25s} | {int(tk_tpc):>6d} | {tk_tps:>11,.0f}/s | {rt_tps:>11,.0f}/s | {speedup:>5.2f}x {winner}")
 

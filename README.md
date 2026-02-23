@@ -1,4 +1,4 @@
-# 🦀 runtoken
+# runtoken
 
 **A blazing-fast BPE tokenizer for LLMs. Drop-in tiktoken replacement, 20-80x faster.**
 
@@ -28,20 +28,20 @@ Apples-to-apples comparison — both called as Python packages, same machine, sa
 
 | Input | tiktoken | runtoken | Speedup |
 |-------|----------|----------|---------|
-| Short text (29 chars, 9 tokens) | 1.3M tok/s | 24.6M tok/s | **19x** 🦀 |
-| Medium text (1050 chars, 511 tokens) | 2.5M tok/s | 68.8M tok/s | **27x** 🦀 |
-| Code (1200 chars, 380 tokens) | 1.5M tok/s | 63.5M tok/s | **44x** 🦀 |
-| Long English (4500 chars, 1001 tokens) | 2.5M tok/s | 73.6M tok/s | **29x** 🦀 |
-| Long code (5600 chars, 2160 tokens) | 1.5M tok/s | 88.2M tok/s | **59x** 🦀 |
-| Unicode (500 chars, 420 tokens) | 4.2M tok/s | 89.2M tok/s | **21x** 🦀 |
+| Short text (29 chars, 9 tokens) | 1.3M tok/s | 24.6M tok/s | **19x** |
+| Medium text (1050 chars, 511 tokens) | 2.5M tok/s | 68.8M tok/s | **27x** |
+| Code (1200 chars, 380 tokens) | 1.5M tok/s | 63.5M tok/s | **44x** |
+| Long English (4500 chars, 1001 tokens) | 2.5M tok/s | 73.6M tok/s | **29x** |
+| Long code (5600 chars, 2160 tokens) | 1.5M tok/s | 88.2M tok/s | **59x** |
+| Unicode (500 chars, 420 tokens) | 4.2M tok/s | 89.2M tok/s | **21x** |
 
 ### Count-only (the gateway use case)
 
 | Input | tiktoken | runtoken | Speedup |
 |-------|----------|----------|---------|
-| Medium text | 2.5M tok/s | 940M tok/s | **381x** 🦀 |
-| Long English | 2.6M tok/s | 1.4B tok/s | **538x** 🦀 |
-| Long code | 1.5M tok/s | 2.6B tok/s | **1750x** 🦀 |
+| Medium text | 2.5M tok/s | 940M tok/s | **381x** |
+| Long English | 2.6M tok/s | 1.4B tok/s | **538x** |
+| Long code | 1.5M tok/s | 2.6B tok/s | **1750x** |
 
 > Benchmarked on a 2-vCPU cloud instance. Count-only benefits from multi-level caching (text-level + chunk-level LRU).
 
