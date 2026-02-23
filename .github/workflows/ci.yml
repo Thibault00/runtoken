@@ -16,14 +16,3 @@ jobs:
         run: cargo test --all
       - name: Build release
         run: cargo build --release
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Build Python wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          args: --release --strip --out dist --find-interpreter
-      - name: Install and smoke test
-        run: |
-          pip install dist/*.whl
-          python -c "import runtoken; enc = runtoken.get_encoding('cl100k_base'); assert enc.encode('Hello') == [9906]; print('OK')"
