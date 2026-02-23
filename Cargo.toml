@@ -1,0 +1,39 @@
+[package]
+name = "runtoken"
+version = "0.1.0"
+edition = "2021"
+description = "A fast multi-model BPE tokenizer for LLM gateway proxies"
+license = "MIT"
+
+[lib]
+name = "runtoken"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "runtoken-cli"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+fancy-regex = "0.14"
+rustc-hash = "2"
+lru = "0.12"
+rayon = "1.10"
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# target-cpu = "native"  # set via RUSTFLAGS instead
+
+[[bench]]
+name = "benchmark"
+harness = false
